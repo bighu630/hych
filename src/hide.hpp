@@ -3,7 +3,7 @@
 
 struct SHideNodeData
 {
-  CWindow *pWindow = nullptr;
+  PHLWINDOW pWindow = nullptr;
 
   bool isMinimized = false;
 
@@ -18,13 +18,13 @@ struct SHideNodeData
 
 class Hide {
 public:
-  SHideNodeData *getNodeFromWindow(CWindow *pWindow); 
-  void hideWindowToSpecial(CWindow *pWindow);
-  void restoreWindowFromSpecial(CWindow *pWindow);
+  SHideNodeData *getNodeFromWindow(PHLWINDOW pWindow);
+  void hideWindowToSpecial(PHLWINDOW pWindow);
+  void restoreWindowFromSpecial(PHLWINDOW pWindow);
   void refocusToSourceWorkspaceAfterMove(int workspaceID);
-  void moveWindowToSpecialWorlspace(CWindow *pWindow);
+  void moveWindowToSpecialWorkspace(PHLWINDOW pWindow);
   void leaveSpecialWorkspace();
-  std::list<SHideNodeData> m_lHideNodesData; 
+  std::list<SHideNodeData> m_lHideNodesData;
 
 };
 

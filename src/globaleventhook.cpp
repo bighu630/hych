@@ -1,24 +1,23 @@
 #include "dispatchers.hpp"
-#include <hyprland/src/SharedDefs.hpp>
 #include "hide.hpp"
 
-typedef void (*origIHyprLayout_requestFocusForWindow)(void* , CWindow* pWindow);
+typedef void (*origIHyprLayout_requestFocusForWindow)(void* , PHLWINDOW pWindow);
 typedef void (*origCWindow_moveToWorkspace)(void*,int workspaceID);
-typedef void (*origOnKeyboardKey)(void*, wlr_keyboard_key_event* e, SKeyboard* pKeyboard);
+typedef void (*origOnKeyboardKey)(void*, std::any e, SP<IKeyboard> pKeyboard);
 
 void openWindowHook(void* self, SCallbackInfo &info, std::any data) {
-    auto* const pWindow = std::any_cast<CWindow*>(data);
-    
+    auto const pWindow = std::any_cast<PHLWINDOW>(data);
+
     if (pWindow->isHidden() || !pWindow->m_bIsMapped || pWindow->m_bFadingOut || pWindow->m_bX11DoesntWantBorders)
       return;
 
     const auto pNode = &g_hych_Hide->m_lHideNodesData.emplace_back(); // make a new node in list back
-    const auto pWindowOriWorkspace = g_pCompositor->getWorkspaceByID(pWindow->m_iWorkspaceID);
+    const auto pWindowOriWorkspace = g_pCompositor->getWorkspaceByID(pWindow->m_pWorkspace->m_iID);
 
     pNode->pWindow = pWindow;
 
-    if(!g_pCompositor->isWorkspaceSpecial(pWindow->m_iWorkspaceID)) { 
-      pNode->hibk_workspaceID = pWindow->m_iWorkspaceID;
+    if(!g_pCompositor->isWorkspaceSpecial(pWindow->m_pWorkspace->m_iID)) {
+      pNode->hibk_workspaceID = pWindow->m_pWorkspace->m_iID;
       pNode->hibk_workspaceName = pWindowOriWorkspace->m_szName;
       pNode->isMinimized = false;
     } else {
@@ -28,50 +27,48 @@ void openWindowHook(void* self, SCallbackInfo &info, std::any data) {
       wlr_foreign_toplevel_handle_v1_set_minimized(pWindow->m_phForeignToplevel, true);
     }
 
-    
+
     hych_log(LOG,"bind a memory node to window:{}",pNode->pWindow);
-  
+
 }
 
 void closeWindowHook(void* self, SCallbackInfo &info, std::any data) {
-    auto* const pWindow = std::any_cast<CWindow*>(data);
-    
+    auto const pWindow = std::any_cast<PHLWINDOW>(data);
+
     auto pNode = g_hych_Hide->getNodeFromWindow(pWindow);
 
     if (!pNode)
         return;
 
     g_hych_Hide->m_lHideNodesData.remove(*pNode);
-    hych_log(LOG,"remove a memory node which is bind to window:{}",pNode->pWindow);    
-  
+    hych_log(LOG,"remove a memory node which is bind to window:{}",pNode->pWindow);
+
 }
 
 
 void workspaceHook(void* self, SCallbackInfo &info, std::any data) {
   auto* const pWorkspace = std::any_cast<CWorkspace*>(data);
-    
-  auto pNode = g_hych_Hide->getNodeFromWindow(g_pCompositor->m_pLastWindow);
+
+  auto pNode = g_hych_Hide->getNodeFromWindow(g_pCompositor->m_pLastWindow.lock());
 
   if (pNode && !pNode->isMinimized && !g_pCompositor->isWorkspaceSpecial(pWorkspace->m_iID)) {
      pNode->hibk_workspaceID = pWorkspace->m_iID;
      pNode->hibk_workspaceName =pWorkspace->m_szName;
-     hych_log(LOG,"update workspace memory,workspaceID:{},window:{}",pWorkspace->m_iID,pNode->pWindow);    
+     hych_log(LOG,"update workspace memory,workspaceID:{},window:{}",pWorkspace->m_iID,pNode->pWindow);
   }
 }
 
 
-void hkIHyprLayout_requestFocusForWindow(void* thisptr,CWindow* pWindow) {
+void hkIHyprLayout_requestFocusForWindow(void* thisptr,PHLWINDOW pWindow) {
 
   auto pNode = g_hych_Hide->getNodeFromWindow(pWindow);
   if (pNode && pNode->isMinimized) {
     g_hych_Hide->restoreWindowFromSpecial(pWindow);
-    hych_log(LOG,"click waybar to restore window:{}",pWindow);    
     return;
   }
 
   if(pNode && !pNode->isMinimized && pWindow == g_pCompositor->m_pLastWindow) {
     g_hych_Hide->hideWindowToSpecial(pWindow);
-    hych_log(LOG,"click waybar to minimize window:{}",pWindow);    
     return;
   }
 
@@ -79,51 +76,51 @@ void hkIHyprLayout_requestFocusForWindow(void* thisptr,CWindow* pWindow) {
 }
 
 void hkCWindow_moveToWorkspace(void* thisptr,int workspaceID) {
-  auto pWindow = g_pCompositor->m_pLastWindow;
+  PHLWINDOW pWindow = g_pCompositor->m_pLastWindow.lock();
   auto pNode = g_hych_Hide->getNodeFromWindow(pWindow);
 
   if (pNode && g_pCompositor->isWorkspaceSpecial(workspaceID)) {
     pNode->isMinimized = true;
     wlr_foreign_toplevel_handle_v1_set_minimized(pWindow->m_phForeignToplevel, true);
-    hych_log(LOG,"window enter special workspace,minimized:{},window:{}",pNode->isMinimized,pWindow); 
-  } else if(pNode && g_pCompositor->m_pLastMonitor->specialWorkspaceID != 0) {
+    hych_log(LOG,"window enter special workspace,minimized:{},window:{}",pNode->isMinimized,pWindow);
+  } else if(pNode && g_pCompositor->m_pLastMonitor->activeSpecialWorkspace->m_iID != 0) {
       pNode->isMinimized = false;
-      wlr_foreign_toplevel_handle_v1_set_minimized(pWindow->m_phForeignToplevel, false);  
-      hych_log(LOG,"window leave special workspace,minimized:{},window:{}",pNode->isMinimized,pWindow); 
+      wlr_foreign_toplevel_handle_v1_set_minimized(pWindow->m_phForeignToplevel, false);
+      hych_log(LOG,"window leave special workspace,minimized:{},window:{}",pNode->isMinimized,pWindow);
   }
-  
+
   (*(origCWindow_moveToWorkspace)g_hych_pCWindow_moveToWorkspaceHook->m_pOriginal)(thisptr, workspaceID);
 
 }
 
 void hkEvents_listener_requestMinimize(void* thisptr,void* owner, void* data) {
-    auto pWindow = g_pCompositor->m_pLastWindow;
+    PHLWINDOW pWindow = g_pCompositor->m_pLastWindow.lock();
     auto pNode = g_hych_Hide->getNodeFromWindow(pWindow);
 
     if(pNode && !pNode->isMinimized) {
-      hych_log(LOG,"receive minimize request from client,window:{}",pWindow); 
+      hych_log(LOG,"receive minimize request from client,window:{}",pWindow);
       g_hych_Hide->hideWindowToSpecial(pWindow);
     }
 }
 
-std::string getKeynameFromKeycode(wlr_keyboard_key_event* e, SKeyboard* pKeyboard) {
-  struct wlr_keyboard *keyboard =  (struct wlr_keyboard *)pKeyboard->keyboard;
-  xkb_keycode_t keycode = e->keycode + 8;
-  xkb_keysym_t keysym = xkb_state_key_get_one_sym(keyboard->xkb_state, keycode);
-  char *tmp_keyname = new char[64];
-  xkb_keysym_get_name(keysym, tmp_keyname, 64);
-  std::string keyname = tmp_keyname;
-  delete[] tmp_keyname;
-  return keyname;
+std::string getKeynameFromKeycode(IKeyboard::SKeyEvent e, SP<IKeyboard> pKeyboard) {
+    auto keyboard = pKeyboard.get();
+    xkb_keycode_t keycode = e.keycode + 8;
+    xkb_keysym_t keysym = xkb_state_key_get_one_sym(keyboard->xkbState, keycode);
+    char *tmp_keyname = new char[64];
+    xkb_keysym_get_name(keysym, tmp_keyname, 64);
+    std::string keyname = tmp_keyname;
+    delete[] tmp_keyname;
+    return keyname;
 }
 
-bool isKeyReleaseToggleExitOverviewHit(wlr_keyboard_key_event* e, SKeyboard* pKeyboard) {
+bool isKeyReleaseToggleExitOverviewHit(IKeyboard::SKeyEvent e, SP<IKeyboard> pKeyboard) {
   if (g_hych_alt_replace_key == "")
     return false;
 
-  if (isNumber(g_hych_alt_replace_key) && std::stoi(g_hych_alt_replace_key) > 9 && std::stoi(g_hych_alt_replace_key) == (e->keycode + 8)) {
+  if (isNumber(g_hych_alt_replace_key) && std::stoi(g_hych_alt_replace_key) > 9 && std::stoi(g_hych_alt_replace_key) == (e.keycode + 8)) {
     return true;
-  } else if (g_hych_alt_replace_key.find("code:") == 0 && isNumber(g_hych_alt_replace_key.substr(5)) && std::stoi(g_hych_alt_replace_key.substr(5)) == (e->keycode + 8)) {
+  } else if (g_hych_alt_replace_key.find("code:") == 0 && isNumber(g_hych_alt_replace_key.substr(5)) && std::stoi(g_hych_alt_replace_key.substr(5)) == (e.keycode + 8)) {
     return true;
   } else {
     std::string keyname = getKeynameFromKeycode(e,pKeyboard);
@@ -135,10 +132,13 @@ bool isKeyReleaseToggleExitOverviewHit(wlr_keyboard_key_event* e, SKeyboard* pKe
   return false;
 }
 
-static void hkOnKeyboardKey(void* thisptr,wlr_keyboard_key_event* e, SKeyboard* pKeyboard) {
+static void hkOnKeyboardKey(void* thisptr,std::any event, SP<IKeyboard> pKeyboard) {
 
-  (*(origOnKeyboardKey)g_hych_pOnKeyboardKeyHook->m_pOriginal)(thisptr, e, pKeyboard);
-  if(g_hych_enable_alt_release_exit && g_pCompositor->m_pLastMonitor->specialWorkspaceID != 0 && e->state == WL_KEYBOARD_KEY_STATE_RELEASED) {
+  (*(origOnKeyboardKey)g_hych_pOnKeyboardKeyHook->m_pOriginal)(thisptr, event, pKeyboard);
+
+  auto e = std::any_cast<IKeyboard::SKeyEvent>(event);
+
+  if(g_hych_enable_alt_release_exit && g_pCompositor->m_pLastMonitor->activeSpecialWorkspace->m_iID != 0 && e.state == WL_KEYBOARD_KEY_STATE_RELEASED) {
     if (!isKeyReleaseToggleExitOverviewHit(e,pKeyboard))
       return;
     restore_minimize_window("");

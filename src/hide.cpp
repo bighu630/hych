@@ -1,6 +1,6 @@
 #include "hide.hpp"
 
-SHideNodeData *Hide::getNodeFromWindow(CWindow *pWindow)
+SHideNodeData *Hide::getNodeFromWindow(PHLWINDOW pWindow)
 {
     for (auto &nd : m_lHideNodesData)
     {
@@ -14,8 +14,8 @@ SHideNodeData *Hide::getNodeFromWindow(CWindow *pWindow)
 void Hide::refocusToSourceWorkspaceAfterMove(int workspaceID) {
     for (auto &w : g_pCompositor->m_vWindows)
     {
-		CWindow *pWindow = w.get();
-        if ((g_pCompositor->m_pLastMonitor->specialWorkspaceID != 0 && !g_pCompositor->isWorkspaceSpecial(pWindow->m_iWorkspaceID)) || pWindow->m_iWorkspaceID != workspaceID || pWindow->isHidden() || !pWindow->m_bIsMapped || pWindow->m_bFadingOut || pWindow->m_bIsFullscreen)
+	    PHLWINDOW pWindow = w;
+        if ((!g_pCompositor->isWorkspaceSpecial(pWindow->m_pWorkspace->m_iID)) || pWindow->m_pWorkspace->m_iID != workspaceID || pWindow->isHidden() || !pWindow->m_bIsMapped || pWindow->m_bFadingOut || pWindow->isFullscreen())
             continue;
         g_pCompositor->focusWindow(pWindow);
         return;
@@ -23,17 +23,18 @@ void Hide::refocusToSourceWorkspaceAfterMove(int workspaceID) {
 	g_pCompositor->focusWindow(nullptr);
 }
 
-void Hide::moveWindowToSpecialWorlspace(CWindow *pWindow) {
+void Hide::moveWindowToSpecialWorkspace(PHLWINDOW pWindow) {
     std::string workspaceName = "";
 
-    const int   WORKSPACEID = getWorkspaceIDFromString("special", workspaceName);
+    // TODO: 魔法数+1
+    const int WORKSPACEID = 86;
 
     if (WORKSPACEID == INT_MAX) {
         Debug::log(ERR, "Error in moveActiveToWorkspaceSilent, invalid value");
         return;
     }
 
-    if (WORKSPACEID == pWindow->m_iWorkspaceID)
+    if (WORKSPACEID == pWindow->m_pWorkspace->m_iID)
         return;
 
     g_pHyprRenderer->damageWindow(pWindow);
@@ -43,7 +44,7 @@ void Hide::moveWindowToSpecialWorlspace(CWindow *pWindow) {
     if (pWorkspace) {
         g_pCompositor->moveWindowToWorkspaceSafe(pWindow, pWorkspace);
     } else {
-        pWorkspace = g_pCompositor->createNewWorkspace(WORKSPACEID, pWindow->m_iMonitorID, workspaceName);
+        pWorkspace = g_pCompositor->createNewWorkspace(WORKSPACEID, pWindow->m_pMonitor->ID, workspaceName);
         g_pCompositor->moveWindowToWorkspaceSafe(pWindow, pWorkspace);
     }
 }
@@ -54,27 +55,27 @@ void Hide::leaveSpecialWorkspace() {
 
 }
 
-void Hide::hideWindowToSpecial(CWindow *pWindow) {
+void Hide::hideWindowToSpecial(PHLWINDOW pWindow) {
 
     auto pNode = getNodeFromWindow(pWindow);
-    int workspaceID = pWindow->m_iWorkspaceID;
-    if(!pNode) 
+    int workspaceID = pWindow->m_pWorkspace->m_iID;
+    if(!pNode)
         return;
 
     pNode->isMinimized = true;
 
-    moveWindowToSpecialWorlspace(pWindow);
+    moveWindowToSpecialWorkspace(pWindow);
     refocusToSourceWorkspaceAfterMove(workspaceID);
     wlr_foreign_toplevel_handle_v1_set_activated(pWindow->m_phForeignToplevel, false);
 }
 
 
-void Hide::restoreWindowFromSpecial(CWindow *pWindow) {
+void Hide::restoreWindowFromSpecial(PHLWINDOW pWindow) {
 
-    CWorkspace *pWorkspace;
+    PHLWORKSPACE pWorkspace;
     auto pNode = getNodeFromWindow(pWindow);
-    
-    if(!pNode) 
+
+    if(!pNode)
         return;
 
     pNode->isMinimized = false;
@@ -83,13 +84,13 @@ void Hide::restoreWindowFromSpecial(CWindow *pWindow) {
         pWorkspace = g_pCompositor->getWorkspaceByID(pNode->hibk_workspaceID);
         if (!pWorkspace){
             hych_log(LOG,"source workspace no exist");
-            pWorkspace = g_pCompositor->createNewWorkspace(pNode->hibk_workspaceID, pNode->pWindow->m_iMonitorID,pNode->hibk_workspaceName);
+            pWorkspace = g_pCompositor->createNewWorkspace(pNode->hibk_workspaceID, pNode->pWindow->m_pMonitor->ID,pNode->hibk_workspaceName);
         }
     } else {
         pWorkspace =  g_pCompositor->getWorkspaceByID(g_pCompositor->m_pLastMonitor->activeWorkspace);
     }
 
-    auto pMonitor = g_pCompositor->getMonitorFromID(pWorkspace->m_iMonitorID);
+    auto pMonitor = g_pCompositor->getMonitorFromID(pWorkspace->m_pMonitor->ID);
     g_pCompositor->moveWindowToWorkspaceSafe(pWindow, pWorkspace);
     pMonitor->changeWorkspace(pWorkspace);
 
